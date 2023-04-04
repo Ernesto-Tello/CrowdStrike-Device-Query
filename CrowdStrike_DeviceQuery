@@ -1,0 +1,161 @@
+using System;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using RestSharp;
+using System.IO;
+using System.Collections.Generic;
+using RestSharp.Authenticators;
+using RestSharp.Authenticators.OAuth2;
+using System.ComponentModel;
+using System.Runtime.Serialization;
+using System.Reflection;
+
+namespace CrowdStrike_DeviceQuery
+{
+    class Program
+    {
+        public static string wd = new FileInfo(Assembly.GetExecutingAssembly().Location).DirectoryName;
+        public static string computersList = wd + "//TXT//ComputersList.txt";
+        static void Main(string[] args)
+        {
+            string baseURL = "https://api.crowdstrike.com";
+            //string oauthUrl = baseURL + "/oauth2/token"; //Generate an OAuth2 access token
+            string secret = "Your Falcon API Key Secret";
+            string clientId = "Your Falcon API Client ID";
+            string oauthData = "client_id="+ clientId + "&client_secret="+ secret;
+
+            RestClient client = new RestClient(baseURL);
+            RestRequest authRequest = new RestRequest("/oauth2/token", Method.Post);
+            authRequest.AddHeader("Accept", "application/json");
+            authRequest.AddHeader("Content-Type", "application/x-www-form-urlencoded");
+            authRequest.AddStringBody(oauthData,ContentType.Plain);
+            RestResponse oauthResponse = client.Execute(authRequest);
+            oauth2Token oauthdData = JsonConvert.DeserializeObject<oauth2Token>(oauthResponse.Content);
+
+            string token = oauthdData.access_token;
+            string tokenType = oauthdData.token_type;
+            int expiresIn = oauthdData.expires_in;
+            string atobb64auth = Base64Encode(clientId + ":" + secret);
+
+            List<string> txtDevices = File.ReadAllLines(computersList).ToList();
+            foreach (string txtDevice in txtDevices)
+            {
+                //filter by platfor, serial_number, hostname
+                string hostsUri = "/devices/queries/devices/v1?limit=10&filter=hostname:"+ "'"+txtDevice+"'";
+                RestRequest deviceRequest = new RestRequest(hostsUri, Method.Get);
+                deviceRequest.AddHeader("Accept", "application/json");
+                deviceRequest.AddHeader("Authorization", "Bearer " + token);;
+                RestResponse deviceResponse = client.Execute(deviceRequest);
+                DeviceClass device = JsonConvert.DeserializeObject<DeviceClass>(oauthResponse.Content);
+            }
+
+            revokeToken(token, client);
+
+        }
+
+        public static void revokeToken(string Token, RestClient restClient) 
+        {
+            string secret = "Your Falcon API Key Secret";
+            string clientId = "Your Falcon API Client ID";
+            string atobb64auth = Base64Encode(clientId + ":"+ secret);
+            RestRequest revokeRequest = new RestRequest("/oauth2/revoke", Method.Post);
+            revokeRequest.AddHeader("accept", "application/json");
+            revokeRequest.AddHeader("Content-Type", "application/x-www-form-urlencoded");
+            revokeRequest.AddHeader("Authorization", "basic " + atobb64auth);
+            revokeRequest.AddBody("token="+Token); //OK
+            RestResponse tokenRevokeResponse = restClient.Execute(revokeRequest);
+            if (tokenRevokeResponse.StatusCode == System.Net.HttpStatusCode.OK) 
+            {
+                Console.WriteLine("Token Revoked Successfully");
+            }
+            else
+            {
+                Console.WriteLine("Token was not successfully revoked");
+            }
+
+
+        }
+
+        public static string Base64Encode(string plainText)
+        {
+            var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(plainText);
+            return System.Convert.ToBase64String(plainTextBytes);
+        }
+        public static string Base64Decode(string base64EncodedData)
+        {
+            var base64EncodedBytes = System.Convert.FromBase64String(base64EncodedData);
+            return System.Text.Encoding.UTF8.GetString(base64EncodedBytes);
+        }
+    }
+    //oauth2 Token Classes
+    public class oauth2Token
+    {
+        public string access_token { get; set; }
+        public int expires_in { get; set; }
+        public string token_type { get; set; }
+    }
+
+    //Revoke Token Classes
+    public class revokeTokenRoot
+    {
+        public List<revokeTokenError> errors { get; set; }
+        public revokeTokenMeta meta { get; set; }
+    }
+    public class revokeTokenError
+    {
+        public int code { get; set; }
+        public string id { get; set; }
+        public string message { get; set; }
+    }
+    public class revokeTokenMeta
+    {
+        public revokeTokenPagination pagination { get; set; }
+        public string powered_by { get; set; }
+        public int query_time { get; set; }
+        public string trace_id { get; set; }
+        public revokeTokenWrites writes { get; set; }
+    }
+
+    public class revokeTokenPagination
+    {
+        public int limit { get; set; }
+        public int offset { get; set; }
+        public int total { get; set; }
+    }
+    public class revokeTokenWrites
+    {
+        public int resources_affected { get; set; }
+    }
+    //Token class to be used for revoking
+    [DataContract]
+    public class Token
+    {
+        [DataMember]
+        public string token { get; set; }
+    }
+
+    //Get Devices Class
+    public class Meta
+    {
+        public double query_time { get; set; }
+        public Pagination pagination { get; set; }
+        public string powered_by { get; set; }
+        public string trace_id { get; set; }
+    }
+
+    public class Pagination
+    {
+        public int offset { get; set; }
+        public int limit { get; set; }
+        public int total { get; set; }
+    }
+
+    public class DeviceClass
+    {
+        public Meta meta { get; set; }
+        public List<string> resources { get; set; }
+        public List<object> errors { get; set; }
+    }
+
+
+}
